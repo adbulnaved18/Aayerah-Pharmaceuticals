@@ -83,7 +83,7 @@ function getStoredComplianceDocs(): ComplianceDoc[] {
     const raw = localStorage.getItem('aayerah_compliance_docs') || localStorage.getItem('aairah_compliance_docs');
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
+      if (Array.isArray(parsed)) {
         // Automatically purge any dummy sample/test documents
         const cleaned = parsed.filter(d => 
           !['tax-id', 'gstin', 'drug-license'].includes(d.id) && 
@@ -92,7 +92,7 @@ function getStoredComplianceDocs(): ComplianceDoc[] {
         if (cleaned.length !== parsed.length) {
           saveStoredComplianceDocs(cleaned);
         }
-        if (cleaned.length > 0) return cleaned;
+        return cleaned;
       }
     }
   } catch {}
