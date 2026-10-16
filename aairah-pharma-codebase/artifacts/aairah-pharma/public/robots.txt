@@ -3,4 +3,4 @@ Allow: /
 Disallow: /admin/
 Disallow: /adminlogin
 
-Sitemap: https://aayerah-pharma.com/sitemap.xml
+Sitemap: https://aayerah-pharmaceuticals.vercel.app/sitemap.xml

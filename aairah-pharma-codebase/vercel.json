@@ -4,5 +4,5 @@
   "installCommand": "pnpm install --frozen-lockfile",
   "buildCommand": "pnpm run build",
   "outputDirectory": "artifacts/aairah-pharma/dist/public",
-  "rewrites": [{ "source": "/((?!assets/|hero/|robots\\.txt|sitemap\\.xml|favicon\\.ico).*)", "destination": "/index.html" }]
+  "rewrites": [{ "source": "/((?!assets/|hero/|robots\\.txt|sitemap\\.xml|favicon\\.(?:ico|png|svg)).*)", "destination": "/index.html" }]
 }
