@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: aayerah-commerce-api
+    runtime: python
+    rootDir: Base-forked/Base-forked/backend
+    plan: free
+    buildCommand: pip install -r requirements.lock && alembic upgrade head
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 2
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.4
+      - key: STORAGE_BACKEND
+        value: supabase
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_PRODUCT_IMAGES_BUCKET
+        value: product-images
+      - key: SUPABASE_PRIVATE_FILES_BUCKET
+        value: private-documents
+      - key: DATABASE_URL
+        sync: false
+      - key: CORS_ORIGINS
+        value: '["https://aayerah.com", "http://localhost:5173"]'
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: MAX_IMAGE_BYTES
+        value: "5242880"
+      - key: SESSION_HOURS
+        value: "24"
+      - key: GEMINI_API_KEY
+        sync: false

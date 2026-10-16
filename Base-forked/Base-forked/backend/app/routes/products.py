@@ -22,8 +22,6 @@ from ..services.stock_import_service import (
     generate_inventory_csv_template,
 )
 
-from starlette.datastructures import UploadFile as StarletteUploadFile
-
 router = APIRouter(prefix='/product', tags=['Products'])
 
 @router.get('/shop')
@@ -50,6 +48,10 @@ def get_product(db, product_id, lock=False):
 @router.get('/product/{product_id}')
 def detail(product_id: str, db: DB): return product_json(get_product(db, product_id))
 
+from ..services.storage import get_storage
+
+from starlette.datastructures import UploadFile as StarletteUploadFile
+
 async def parse_product(request, existing=None):
     uploaded = None
     if request.headers.get('content-type', '').startswith('multipart/form-data'):
@@ -66,8 +68,8 @@ async def parse_product(request, existing=None):
         data = {**{key: getattr(existing, key) for key in ProductInput.model_fields}, **data}
     try: validated = ProductInput.model_validate(data)
     except ValidationError as exc: raise HTTPException(422, [{'loc': list(e['loc']), 'msg': e['msg']} for e in exc.errors()])
-    image_url = existing.image if existing else ''
-    new_path = None
+    image_bytes = None
+    new_key = None
     if uploaded:
         raw = await uploaded.read(settings.max_image_bytes + 1)
         if len(raw) > settings.max_image_bytes: raise HTTPException(413, 'Image exceeds upload limit')
@@ -81,24 +83,33 @@ async def parse_product(request, existing=None):
                     img.thumbnail((1600, 1600))
                     output = io.BytesIO()
                     img.convert('RGB').save(output, 'WEBP', quality=85)
+                    image_bytes = output.getvalue()
         except (UnidentifiedImageError, ValueError, OSError, Image.DecompressionBombError, Image.DecompressionBombWarning):
             raise HTTPException(422, 'Provide a valid JPEG, PNG or WebP image under 20 megapixels')
-        folder = Path(settings.upload_dir)
-        folder.mkdir(parents=True, exist_ok=True)
-        new_path = folder / f'{uuid4().hex}.webp'
-        new_path.write_bytes(output.getvalue())
-        image_url = f'{settings.public_base_url.rstrip("/")}/uploads/{new_path.name}'
-    return validated.model_dump(), image_url, new_path
+        new_key = f'{uuid4().hex}.webp'
+    return validated.model_dump(), image_bytes, new_key
 
 @router.post('/createproduct', status_code=201)
 async def create(request: Request, db: DB, admin: Owner):
-    data, image_url, path = await parse_product(request)
-    product = Product(**data, image=image_url, image_public_id=path.name if path else '', owner_id=admin.id)
+    data, image_bytes, new_key = await parse_product(request)
+    storage = get_storage()
+    image_url = ''
+    image_public_id = ''
+    if image_bytes and new_key:
+        await storage.upload_async(new_key, image_bytes, 'image/webp', is_public=True)
+        image_url = storage.get_public_url(new_key)
+        image_public_id = new_key
+
+    product = Product(**data, image=image_url, image_public_id=image_public_id, owner_id=admin.id)
     try:
         db.add(product)
         db.commit()
     except Exception:
-        if path: path.unlink(missing_ok=True)
+        if new_key:
+            try:
+                await storage.delete_async(new_key, is_public=True)
+            except Exception:
+                pass
         raise
     result = product_json(product)
     return {**result, 'product': result, 'message': 'Product saved'}
@@ -107,15 +118,37 @@ async def create(request: Request, db: DB, admin: Owner):
 @router.put('/updateproduct/{product_id}')
 async def update(product_id: str, request: Request, db: DB, admin: Owner):
     product = get_product(db, product_id, lock=True)
-    data, image_url, path = await parse_product(request, product)
+    old_key = product.image_public_id
+    data, image_bytes, new_key = await parse_product(request, product)
+    storage = get_storage()
+
+    if image_bytes and new_key:
+        # Upload new image first
+        await storage.upload_async(new_key, image_bytes, 'image/webp', is_public=True)
+        product.image = storage.get_public_url(new_key)
+        product.image_public_id = new_key
+
+    for key, value in data.items():
+        setattr(product, key, value)
+
     try:
-        for key, value in data.items(): setattr(product, key, value)
-        product.image = image_url
-        if path: product.image_public_id = path.name
         db.commit()
     except Exception:
-        if path: path.unlink(missing_ok=True)
+        # If DB update fails, attempt cleanup of newly uploaded image
+        if new_key:
+            try:
+                await storage.delete_async(new_key, is_public=True)
+            except Exception:
+                pass
         raise
+
+    # If DB update succeeded and a new image replaced an existing one, delete old image
+    if new_key and old_key and old_key != new_key:
+        try:
+            await storage.delete_async(old_key, is_public=True)
+        except Exception:
+            pass
+
     result = product_json(product)
     return {**result, 'product': result, 'message': 'Product saved'}
 
