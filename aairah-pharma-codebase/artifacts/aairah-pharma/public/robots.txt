@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /admin/
+Disallow: /adminlogin
+
+Sitemap: https://aayerah-pharma.com/sitemap.xml

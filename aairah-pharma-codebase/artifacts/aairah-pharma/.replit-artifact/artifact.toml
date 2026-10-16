@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Aairah Pharma"
+description = "A polished multi-page pharmaceutical storefront with shopping, checkout, account, and operations screens based on the provided Aairah Pharma design archive."
+version = "1.0.0"
+id = "artifacts/aairah-pharma"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22469
+
+[services.development]
+run = "pnpm --filter @workspace/aairah-pharma run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/aairah-pharma", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/aairah-pharma/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22469"
+BASE_PATH = "/"

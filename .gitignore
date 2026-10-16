@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build artifacts
+dist/
+build/
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local databases and uploads
+*.db
+*.sqlite3
+Base-forked/Base-forked/backend/base.db
+Base-forked/Base-forked/backend/uploads/*
+!Base-forked/Base-forked/backend/uploads/.gitkeep
+
+# Environment variables & secrets (NEVER COMMIT)
+.env
+.env.local
+.env.*.local
+*.env
+!*.env.example
+
+# OS & IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Temporary and log files
+*.log
+npm-debug.log*
+pnpm-debug.log*
