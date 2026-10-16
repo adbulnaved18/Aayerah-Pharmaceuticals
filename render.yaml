@@ -1,15 +1,15 @@
 services:
   - type: web
-    name: aayerah-commerce-api
+    name: aayerah-api
     runtime: python
     rootDir: Base-forked/Base-forked/backend
     plan: free
-    buildCommand: pip install -r requirements.lock && alembic upgrade head
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 2
-    healthCheckPath: /health
+    buildCommand: pip install -r requirements.lock
+    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /api/ready
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.4
+        value: 3.12.14
       - key: STORAGE_BACKEND
         value: supabase
       - key: SUPABASE_URL

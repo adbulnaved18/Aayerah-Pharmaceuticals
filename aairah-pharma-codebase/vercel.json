@@ -1,0 +1,8 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "installCommand": "pnpm install --frozen-lockfile",
+  "buildCommand": "pnpm run build",
+  "outputDirectory": "artifacts/aairah-pharma/dist/public",
+  "rewrites": [{ "source": "/((?!assets/|hero/|robots\\.txt|sitemap\\.xml|favicon\\.ico).*)", "destination": "/index.html" }]
+}
