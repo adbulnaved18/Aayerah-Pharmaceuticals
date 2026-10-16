@@ -8,7 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from .config import settings
 from .security import DB
-from .routes import auth, products, chat, stock_imports, offline_sales, sales_analytics, cart, orders
+from .routes import auth, products, chat, stock_imports, offline_sales, sales_analytics
 
 app = FastAPI(
     title='Aayerah Pharma API',
@@ -45,7 +45,7 @@ async def security_headers(request: Request, call_next):
 @app.get('/health', tags=['Health'])
 @app.get('/api/health', tags=['Health'])
 def health():
-    return {'status': 'ok'}
+    return {'status': 'ok', 'app': 'Aayerah Pharma Promotional & Catalogue Service'}
 
 @app.get('/api/ready', tags=['Health'])
 def ready(db: DB):
@@ -55,13 +55,29 @@ def ready(db: DB):
         raise HTTPException(503, 'Database unavailable or migrations missing')
     return {'status': 'ready'}
 
-# Mount active routers (Auth, Products, Cart, Orders, Stock Imports, Offline Sales, Sales Analytics)
-for router in [auth.router, products.router, cart.router, orders.router, stock_imports.router, offline_sales.router, sales_analytics.router]:
+# Mount active routers (Auth, Products catalogue, Stock Imports, Offline Sales, Sales Analytics)
+for router in [auth.router, products.router, stock_imports.router, offline_sales.router, sales_analytics.router]:
     app.include_router(router)
     app.include_router(router, prefix='/api', include_in_schema=False)
 
 app.include_router(chat.router)
 
-Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
-app.mount('/uploads', StaticFiles(directory=settings.upload_dir), name='uploads')
+# Retired ecommerce endpoints respond with intentional 410 Gone
+@app.api_route('/cart', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'], include_in_schema=False)
+@app.api_route('/cart/{path:path}', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'], include_in_schema=False)
+@app.api_route('/api/cart', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'], include_in_schema=False)
+@app.api_route('/api/cart/{path:path}', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'], include_in_schema=False)
+@app.api_route('/orders', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'], include_in_schema=False)
+@app.api_route('/orders/{path:path}', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'], include_in_schema=False)
+@app.api_route('/api/orders', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'], include_in_schema=False)
+@app.api_route('/api/orders/{path:path}', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'], include_in_schema=False)
+def retired_ecommerce(path: str = ''):
+    raise HTTPException(
+        status_code=410,
+        detail='Online ordering and cart workflows are permanently disabled. Aayerah operates as an informational catalogue with verified offline dispensing.'
+    )
+# Mount local uploads static files only when running in local storage mode
+if (settings.storage_backend or 'local').strip().lower() == 'local':
+    Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
+    app.mount('/uploads', StaticFiles(directory=settings.upload_dir), name='uploads')
 

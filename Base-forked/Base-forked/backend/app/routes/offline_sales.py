@@ -6,12 +6,13 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Any
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, Body
-from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, Body, Response
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from sqlalchemy import select, desc
 from sqlalchemy.orm import Session
 
 from ..config import settings
+from ..services.storage import get_storage, StorageNotFoundError, StorageError
 from ..models import (
     InvoiceUpload,
     OfflineSale,
@@ -81,58 +82,68 @@ async def upload_invoice(
             inv_str = f" as Invoice '{existing_sale.invoice_number}'" if existing_sale else ""
             raise HTTPException(409, f"This exact invoice file was already posted{inv_str}. Re-upload rejected to prevent double deduction.")
 
-    # Save physical file to disk
+    # Save file to storage
+    storage = get_storage()
     storage_subpath = f"invoices/{uuid.uuid4()}{ext}"
-    full_path = Path(settings.upload_dir) / storage_subpath
-    full_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(full_path, "wb") as f:
-        f.write(raw_bytes)
-
-    # Create StoredFile metadata
-    stored_file = StoredFile(
-        original_name=fname,
-        storage_key=storage_subpath,
-        mime_type=file.content_type or "application/octet-stream",
-        size=len(raw_bytes),
-        sha256=file_hash,
-        uploader_id=user.id,
-    )
-    db.add(stored_file)
-    db.flush()
-
-    # Process extraction
+    mime = file.content_type or "application/octet-stream"
     try:
-        extraction_res = process_invoice_document(raw_bytes, fname, stored_file.mime_type, db)
+        await storage.upload_async(storage_subpath, raw_bytes, mime, is_public=False)
     except Exception as exc:
-        extraction_res = {
-            "status": "failed",
-            "page_count": 1,
-            "raw_text": "",
-            "fields": {"invoice_number": "", "invoice_date": now().strftime("%Y-%m-%d"), "total": 0.0, "currency": "INR"},
-            "lines": [],
-            "warnings": [f"Extraction failed: {str(exc)}. Please enter line items manually."],
-        }
+        raise HTTPException(502, f"Failed to store invoice file: {exc}")
 
-    upload_rec = InvoiceUpload(
-        file_id=stored_file.id,
-        original_name=fname,
-        storage_key=storage_subpath,
-        file_hash=file_hash,
-        mime_type=stored_file.mime_type,
-        file_size=len(raw_bytes),
-        page_count=extraction_res["page_count"],
-        status=extraction_res["status"],
-        raw_text=extraction_res["raw_text"],
-        extracted_data=extraction_res,
-        reviewed_data=extraction_res,
-        warnings=extraction_res["warnings"],
-        revision=1,
-        history_only=history_only,
-        actor_id=user.id,
-    )
-    db.add(upload_rec)
-    db.commit()
-    db.refresh(upload_rec)
+    try:
+        # Create StoredFile metadata
+        stored_file = StoredFile(
+            original_name=fname,
+            storage_key=storage_subpath,
+            mime_type=mime,
+            size=len(raw_bytes),
+            sha256=file_hash,
+            uploader_id=user.id,
+        )
+        db.add(stored_file)
+        db.flush()
+
+        # Process extraction
+        try:
+            extraction_res = process_invoice_document(raw_bytes, fname, stored_file.mime_type, db)
+        except Exception as exc:
+            extraction_res = {
+                "status": "failed",
+                "page_count": 1,
+                "raw_text": "",
+                "fields": {"invoice_number": "", "invoice_date": now().strftime("%Y-%m-%d"), "total": 0.0, "currency": "INR"},
+                "lines": [],
+                "warnings": [f"Extraction failed: {str(exc)}. Please enter line items manually."],
+            }
+
+        upload_rec = InvoiceUpload(
+            file_id=stored_file.id,
+            original_name=fname,
+            storage_key=storage_subpath,
+            file_hash=file_hash,
+            mime_type=stored_file.mime_type,
+            file_size=len(raw_bytes),
+            page_count=extraction_res["page_count"],
+            status=extraction_res["status"],
+            raw_text=extraction_res["raw_text"],
+            extracted_data=extraction_res,
+            reviewed_data=extraction_res,
+            warnings=extraction_res["warnings"],
+            revision=1,
+            history_only=history_only,
+            actor_id=user.id,
+        )
+        db.add(upload_rec)
+        db.commit()
+        db.refresh(upload_rec)
+    except Exception:
+        # Cleanup uploaded file if database commit fails
+        try:
+            await storage.delete_async(storage_subpath, is_public=False)
+        except Exception:
+            pass
+        raise
 
     return {
         "id": upload_rec.id,
@@ -197,7 +208,7 @@ def get_invoice_upload(upload_id: str, db: DB, _: Owner):
 
 
 @router.post("/invoice-uploads/{upload_id}/re-extract")
-def reextract_invoice_upload(upload_id: str, db: DB, user: Owner):
+async def reextract_invoice_upload(upload_id: str, db: DB, user: Owner):
     """Re-runs extraction (e.g. Gemini Vision with model waterfall) on an existing uploaded invoice file."""
     upload = db.query(InvoiceUpload).filter(InvoiceUpload.id == upload_id).first()
     if not upload:
@@ -205,12 +216,13 @@ def reextract_invoice_upload(upload_id: str, db: DB, user: Owner):
     if upload.status == "posted":
         raise HTTPException(409, "Cannot re-extract an invoice that has already been posted.")
 
-    file_path = os.path.join(settings.upload_dir, upload.storage_key)
-    if not os.path.exists(file_path):
-        raise HTTPException(404, "Uploaded invoice file not found on disk.")
-
-    with open(file_path, "rb") as f:
-        raw_bytes = f.read()
+    storage = get_storage()
+    try:
+        raw_bytes = await storage.read_async(upload.storage_key, is_public=False)
+    except StorageNotFoundError:
+        raise HTTPException(404, "Uploaded invoice file not found in storage.")
+    except Exception as exc:
+        raise HTTPException(502, f"Failed to retrieve invoice file from storage: {exc}")
 
     extraction_res = process_invoice_document(raw_bytes, upload.original_name, upload.mime_type, db)
     upload.extracted_data = extraction_res
@@ -347,12 +359,16 @@ def view_upload_file(
     if not upload:
         raise HTTPException(404, "Upload not found.")
 
-    file_path = Path(settings.upload_dir) / upload.storage_key
-    if not file_path.exists():
-        raise HTTPException(404, "Original document file missing on disk.")
+    storage = get_storage()
+    try:
+        data = storage.read(upload.storage_key, is_public=False)
+    except StorageNotFoundError:
+        raise HTTPException(404, "Original document file missing in storage.")
+    except Exception as exc:
+        raise HTTPException(502, f"Failed to read file from storage: {exc}")
 
     mime = upload.mime_type
-    ext = file_path.suffix.lower()
+    ext = ("." + upload.original_name.rsplit(".", 1)[-1].lower()) if "." in upload.original_name else ""
     if not mime or mime == "application/octet-stream":
         if ext in (".png",):
             mime = "image/png"
@@ -365,10 +381,14 @@ def view_upload_file(
         else:
             mime = "application/octet-stream"
 
-    return FileResponse(
-        path=file_path,
+    return Response(
+        content=data,
         media_type=mime,
-        headers={"Content-Disposition": f'inline; filename="{upload.original_name}"'},
+        headers={
+            "Content-Disposition": f'inline; filename="{upload.original_name}"',
+            "Cache-Control": "private, no-cache, no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 
@@ -389,11 +409,10 @@ def delete_invoice_upload(upload_id: str, db: DB, user: Owner):
             "Use void/credit to correct it instead."
         )
 
-    # Remove physical file from disk if it exists
+    # Remove object from storage if it exists
+    storage = get_storage()
     try:
-        file_path = Path(settings.upload_dir) / upload.storage_key
-        if file_path.exists():
-            file_path.unlink()
+        storage.delete(upload.storage_key, is_public=False)
     except Exception:
         pass  # Non-fatal: metadata deletion still proceeds
 
@@ -615,14 +634,22 @@ def download_sale_attachment(sale_id: str, file_id: str, db: DB, _: Owner):
     if not stored_file:
         raise HTTPException(404, "Stored file record not found.")
 
-    file_path = Path(settings.upload_dir) / stored_file.storage_key
-    if not file_path.exists():
-        raise HTTPException(404, "Attachment file does not exist on disk.")
+    storage = get_storage()
+    try:
+        data = storage.read(stored_file.storage_key, is_public=False)
+    except StorageNotFoundError:
+        raise HTTPException(404, "Attachment file does not exist in storage.")
+    except Exception as exc:
+        raise HTTPException(502, f"Failed to read attachment from storage: {exc}")
 
-    return FileResponse(
-        path=file_path,
-        media_type=stored_file.mime_type,
-        filename=attachment.original_filename,
+    return Response(
+        content=data,
+        media_type=stored_file.mime_type or "application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{attachment.original_filename}"',
+            "Cache-Control": "private, no-cache, no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 
