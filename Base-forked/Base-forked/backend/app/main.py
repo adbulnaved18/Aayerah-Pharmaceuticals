@@ -62,6 +62,14 @@ for router in [auth.router, products.router, cart.router, orders.router, stock_i
 
 app.include_router(chat.router)
 
+class PublicProductImages(StaticFiles):
+    async def get_response(self, path, scope):
+        # Invoice documents share the persistent disk but must only be served
+        # by the authenticated attachment endpoints, never this public mount.
+        if Path(path).name != path or not path.lower().endswith('.webp'):
+            raise HTTPException(404, 'Not found')
+        return await super().get_response(path, scope)
+
 Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
-app.mount('/uploads', StaticFiles(directory=settings.upload_dir), name='uploads')
+app.mount('/uploads', PublicProductImages(directory=settings.upload_dir), name='uploads')
 

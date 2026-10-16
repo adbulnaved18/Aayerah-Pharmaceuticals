@@ -1,0 +1,38 @@
+# Proposed disk-backed deployment. Apply only after paid compute approval.
+services:
+  - type: web
+    name: aayerah-api
+    runtime: python
+    region: singapore
+    plan: starter
+    branch: main
+    rootDir: Base-forked/Base-forked/backend
+    buildCommand: pip install -r requirements.lock
+    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /api/ready
+    autoDeploy: false
+    disk:
+      name: aayerah-uploads
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.14
+      - key: DATABASE_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: UPLOAD_DIR
+        value: /var/data/uploads
+      - key: MAX_IMAGE_BYTES
+        value: '5242880'
+      - key: SESSION_HOURS
+        value: '24'
+      - key: CURRENCY
+        value: INR
+      - key: SHIPPING_FEE
+        value: '20.00'
+      - key: GEMINI_API_KEY
+        sync: false

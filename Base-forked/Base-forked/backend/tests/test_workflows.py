@@ -151,3 +151,16 @@ def test_shipping_fee_and_discount_are_server_controlled(client, user, admin, mo
     assert cart['total'] == 110 and cart['pricing']['shippingFee'] == 20
     order = place(client, user).json()
     assert order['total'] == 110 and order['shippingFee'] == 20
+
+
+def test_private_invoices_not_exposed_by_public_static_mount(client):
+    from pathlib import Path
+    from app.config import settings
+    invoice = Path(settings.upload_dir) / 'invoices' / 'private-test.pdf'
+    invoice.parent.mkdir(parents=True, exist_ok=True)
+    invoice.write_bytes(b'private invoice test')
+    try:
+        assert client.get('/uploads/invoices/private-test.pdf').status_code == 404
+        assert client.get('/uploads/invoices/private-test.pdf', headers={'Authorization': 'Bearer invalid'}).status_code == 404
+    finally:
+        invoice.unlink()
