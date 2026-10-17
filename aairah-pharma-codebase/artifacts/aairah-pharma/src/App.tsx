@@ -1526,8 +1526,8 @@ function Contact() {
                   <div>
                     <strong>Direct Contact Numbers</strong>
                     <p style={{ margin: '4px 0 0', color: 'hsl(var(--muted-foreground))', fontSize: '14px' }}>
-                      Wholesale & Inquiries: <a href="tel:+18005550199" style={{ color: 'inherit', textDecoration: 'underline' }}>+1 (800) 555-0199</a><br />
-                      Facility Reception: <a href="tel:+919876543210" style={{ color: 'inherit', textDecoration: 'underline' }}>+91 98765 43210</a>
+                      Wholesale & Inquiries: <a href="tel:+917606908283" style={{ color: 'inherit', textDecoration: 'underline' }}>+91 76069 08283</a><br />
+                      Facility Reception: <a href="tel:+919777217067" style={{ color: 'inherit', textDecoration: 'underline' }}>+91 97772 17067</a>
                     </p>
                   </div>
                 </div>
